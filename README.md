@@ -5,7 +5,7 @@
 ## Що зроблено
 
 1. **Python-оточення** — віртуальне середовище `.venv`, залежності в `requirements.txt`, встановлено **PySpark** (`pip install pyspark`).
-2. **`docker-compose.yml`** — кластер Spark на образах Bitnami: `spark-master` (порти **8088** → UI, **7077** → master), `spark-worker-1`, `spark-worker-2`. Томи `./jobs` та `./out` змонтовані на **усі** сервіси, щоб виконавці бачили CSV і могли записувати результати.
+2. **`docker-compose.yml`** — кластер Spark на образах **Bitnami Legacy** (`bitnamilegacy/spark`). Тег `bitnami/spark:latest` у Docker Hub [більше не доступний](https://github.com/bitnami/containers/issues/90528); архівний репозиторій зберігає той самий сценарій (`SPARK_MODE`, `SPARK_MASTER_URL`). Сервіси: `spark-master` (порти **8088** → UI, **7077** → master), `spark-worker-1`, `spark-worker-2`. Томи `./jobs` та `./out` змонтовані на **усі** сервіси, щоб виконавці бачили CSV і могли записувати результати.
 3. **Каталог `jobs/`** — тестові дані `Divvy_Trips_2019_Q4.csv` і скрипт **`process.py`** з читанням CSV та п’ятьма окремими функціями під кожне питання лабораторної.
 4. **Каталог `out/`** — результати у форматі CSV (Spark пише папку з `part-*.csv` та службовими файлами; для зручності використано `coalesce(1)`, тобто один файл даних на завдання).
 
@@ -34,9 +34,27 @@ python jobs/process.py
 
 ### На кластері в Docker
 
+Перший запуск завантажить образ `bitnamilegacy/spark:latest` (може зайняти кілька хвилин).
+
+**З прогресом у терміналі** (рекомендовано):
+
+```bash
+./run-docker-spark.sh
+```
+
+Скрипт піднімає `docker compose`, чекає на воркери й запускає `spark-submit` у передньому плані — у консолі видно логи й рядки на кшталт `[Stage N:====>…]`.
+
+**Важливо (образ Bitnami Spark 4 + Docker):** звичайний `docker exec spark-master spark-submit …` часто падає з помилками Ivy (`basedir must be absolute`) або Hadoop (`KerberosAuthException` / `invalid null input: name`) через користувача `spark` і NSS у контейнері. Скрипт запускає submit від **`root`** і задає `JAVA_TOOL_OPTIONS` / `HADOOP_USER_NAME` — це обхід для **локальних** CSV у `/opt/bitnami/spark/jobs`. Для кластера обов’язково вказано `--master spark://spark-master:7077`.
+
+Еквівалент вручну:
+
 ```bash
 docker compose up -d
-docker exec -it spark-master spark-submit /opt/bitnami/spark/jobs/process.py
+sleep 15
+docker exec -u root \
+  -e JAVA_TOOL_OPTIONS="-Duser.home=/root -Duser.name=root" \
+  -e HADOOP_USER_NAME=root \
+  spark-master bash -c 'mkdir -p /root/.ivy2 && exec /opt/bitnami/spark/bin/spark-submit --master spark://spark-master:7077 --deploy-mode client /opt/bitnami/spark/jobs/process.py'
 ```
 
 Після виконання результати з’являться у **`out/`** на хості (том `./out`).
